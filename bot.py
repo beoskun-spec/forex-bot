@@ -5,7 +5,7 @@ import time
 from flask import Flask
 import requests
 
-# --- YOUR CREDENTIALS ---
+# --- CREDENTIALS ---
 BOT_TOKEN = "8966884656:AAElv4PlazAeaXynH7Nxijq9tngnGs6F_uo"
 CHAT_ID = "1041714540"
 ALERT_MINUTES_BEFORE = 15
@@ -14,8 +14,8 @@ CALENDAR_URL = (
     "https://nfs.faireconomy.media/ff_calendar_thisweek.json?version=1"
 )
 sent_alerts = set()
+last_update_id = 0
 
-# Web server bound to Render's environment port
 app = Flask(__name__)
 
 
@@ -42,7 +42,6 @@ def send_telegram_alert(event):
   try:
     res = requests.post(url, json=payload)
     res.raise_for_status()
-    print(f"[{datetime.now()}] Alert sent for {title}")
   except Exception as e:
     print(f"Error sending alert: {e}")
 
@@ -63,19 +62,55 @@ def check_calendar():
         if 0 < time_diff <= ALERT_MINUTES_BEFORE and event_id not in sent_alerts:
           send_telegram_alert(event)
           sent_alerts.add(event_id)
-
   except Exception as e:
     print(f"Error checking calendar: {e}")
 
 
+def handle_incoming_messages():
+  """Polls Telegram for incoming user messages and responds."""
+  global last_update_id
+  url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+
+  try:
+    res = requests.get(
+        url, params={"offset": last_update_id + 1, "timeout": 5}, timeout=10
+    )
+    data = res.json()
+
+    if data.get("ok"):
+      for update in data.get("result", []):
+        last_update_id = update["update_id"]
+
+        if "message" in update and "text" in update["message"]:
+          incoming_text = update["message"]["text"].strip().lower()
+          user_chat_id = update["message"]["chat"]["id"]
+
+          # Handle simple chat commands
+          if incoming_text in ["/start", "hello", "hi"]:
+            reply = "👋 Hello! I'm monitoring high-impact USD economic events for your XAUUSD trades."
+          elif incoming_text == "/status":
+            reply = "✅ Bot is online, active, and checking ForexFactory every 60 seconds."
+          else:
+            reply = f"Received: '{incoming_text}'. Use /status to check system health."
+
+          # Send reply back to user
+          reply_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+          requests.post(
+              reply_url, json={"chat_id": user_chat_id, "text": reply}
+          )
+  except Exception as e:
+    print(f"Error reading incoming messages: {e}")
+
+
 def run_bot():
-  print("Bot started checking events...")
+  print("Bot background loops started...")
   while True:
     check_calendar()
-    time.sleep(60)
+    handle_incoming_messages()
+    time.sleep(3)  # Fast loop to respond quickly to chat messages
 
 
-# Run background calendar check thread
+# Run background loop
 threading.Thread(target=run_bot, daemon=True).start()
 
 if __name__ == "__main__":
