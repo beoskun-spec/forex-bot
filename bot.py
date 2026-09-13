@@ -161,3 +161,37 @@ threading.Thread(target=run_bot, daemon=True).start()
 if __name__ == "__main__":
   port = int(os.environ.get("PORT", 10000))
   app.run(host="0.0.0.0", port=port)
+def check_calendar():
+  headers = {
+      "User-Agent": (
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      )
+  }
+
+  try:
+    response = requests.get(CALENDAR_URL, headers=headers, timeout=10)
+
+    # Check if the server returned a valid response before parsing JSON
+    if response.status_code != 200:
+      print(
+          f"Calendar API returned HTTP status {response.status_code}:"
+          f" {response.text[:100]}"
+      )
+      return
+
+    events = response.json()
+    now = datetime.now(timezone.utc)
+
+    for event in events:
+      if event.get("impact") == "High" and event.get("country") == "USD":
+        event_date_str = event["date"].replace("Z", "+00:00")
+        event_time = datetime.fromisoformat(event_date_str)
+        time_diff = (event_time - now).total_seconds() / 60
+
+        event_id = f"{event.get('title')}_{event.get('date')}"
+        if 0 < time_diff <= ALERT_MINUTES_BEFORE and event_id not in sent_alerts:
+          send_telegram_alert(event)
+          sent_alerts.add(event_id)
+  except Exception as e:
+    print(f"Error checking calendar: {e}")
